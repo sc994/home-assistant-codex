@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.76
+
+- Fork release: install procps-ng in the image so Codex can manage its daemon.
+- Restore explicitly enabled remote control at app startup, with bounded retries that do not block the worker.
+- Explicitly select the trusted Bubblewrap wrapper after bashio initializes the environment.
+- Publish the worker image under ghcr.io/sc994; keep the existing AppArmor policy and sandbox modes.
+- The integration code is unchanged; its version is aligned for release packaging.
+
 ## 0.1.75
 
 - Added **Copy response** below chat answers, including saved answers, to copy their original Markdown while preserving code blocks and YAML indentation. A dialog offers selectable text when automatic copying is unavailable.

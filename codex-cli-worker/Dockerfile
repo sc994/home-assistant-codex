@@ -21,6 +21,7 @@ RUN apk add --no-cache \
     jq \
     nodejs \
     npm \
+    procps-ng \
     python3 \
     py3-pip \
     rsync \

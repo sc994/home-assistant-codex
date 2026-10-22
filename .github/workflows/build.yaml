@@ -1,6 +1,11 @@
 name: Build Codex CLI Worker
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'codex-cli-worker/**'
+      - '.github/workflows/build.yaml'
   workflow_dispatch:
   workflow_call:
     inputs:

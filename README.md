@@ -1,3 +1,5 @@
+> sc994 fork: see [FORK.md](FORK.md) for image publishing, migration, and restart verification.
+
 # Codex for Home Assistant
 
 [![Release][release-badge]][release-url]
