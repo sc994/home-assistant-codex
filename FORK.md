@@ -4,7 +4,7 @@ This fork of moryoav/home-assistant-codex includes image-level fixes for Codex r
 
 ## Images and builds
 
-The worker image is ghcr.io/sc994/codex-cli-worker:0.1.76. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
+The worker image is ghcr.io/sc994/codex-cli-worker:0.1.77. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
 
 Before installation, verify that the image build and multi-architecture manifest succeeded. Ensure the published GHCR package is publicly readable so Home Assistant can pull it without additional registry credentials. Do not install a version before its image is published.
 
@@ -23,3 +23,13 @@ After the image is installed, verify a connected remote session and execute a sa
 The image includes procps-ng. Its startup explicitly selects the existing Bubblewrap wrapper so the scoped AppArmor transition remains in effect. Remote startup retries up to six times and never blocks the Home Assistant worker. It does not disable AppArmor or change host namespace settings.
 
 Image publishing, installation, migration, and a real restart must each be verified; source tests alone do not establish persistence.
+
+## Remote Home Assistant verification (0.1.77)
+
+After updating and restarting the sc994 app, open a new remote session so Codex discovers `home_assistant_remote.verify`. Existing sessions may need their MCP tools refreshed. Ask it to call `verify` with `{"operation":"logs"}` for Core logs. Supported operations are `entity`, `config_check`, `logs`, `dashboard_readback`, and `dashboard`; dashboard captures need a local path such as `/lovelace/0`. Inspect the returned desktop/mobile `image_paths` before drawing visual conclusions.
+
+The worker installs one marked `[mcp_servers.home_assistant_remote]` table in its private Codex configuration. Existing model, plugin and MCP settings are preserved; conflicting or malformed configuration is left untouched and logged as a setup failure. This managed MCP registration contains no credentials. It is visible to local worker sessions as well as paired remote sessions.
+
+Verification uses an owner-only Unix socket and a fresh boot capability in `/data/remote-verification`, with no Supervisor token passed to Codex. Requests are accepted only while the saved remote-control preference is enabled. The bridge permits at most 24 checks and four dashboard captures per minute, one remote request at a time, and shares the browser execution lock with worker checks. Redacted results and screenshots are private local evidence, retained for seven days, with paths returned to the requesting agent. They are not attached to an add-on UI conversation.
+
+Remote verification does not run service calls or reloads, and rejects `save_pending:true`: use a worker task for edits, per-turn backups, and dashboard saves. Historical data tools are separate and are not added by this change. Disable remote control to revoke remote verification; the capability rotates when the app restarts. The Home Assistant integration must point to this worker for Core logs and authenticated dashboard captures.

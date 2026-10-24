@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.77
+
+- Add `home_assistant_remote.verify` to paired remote Codex sessions: Core logs, entity states, configuration checks, dashboard readback and desktop/mobile screenshots.
+- Keep Home Assistant credentials inside the worker; authenticate the local MCP bridge with a fresh owner-only capability on every app start.
+- Share browser concurrency with worker tasks, limit remote checks, and retain redacted evidence privately for seven days.
+- Keep remote verification observational: dashboard saves, service calls, reloads and arbitrary API requests are refused.
+- Wait for MCP registration before restoring the remote daemon, preserving existing Codex configuration and pairing.
+
 ## 0.1.76
 
 - Fork release: install procps-ng in the image so Codex can manage its daemon.

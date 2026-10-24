@@ -27,6 +27,9 @@ if [ -n "${legacy_token}" ]; then
     bashio::log.info "Removed legacy worker API token from app options."
 fi
 
+# Readiness is per app start, not a persistent socket left from a previous process.
+python3 -c 'from pathlib import Path; Path("/run/codex-remote-verification-ready").unlink(missing_ok=True)'
+
 # The enabled preference and pairing identity live in persistent app data.
 # Restore only an explicitly enabled remote connection; keep the worker usable
 # when the remote service or network is temporarily unavailable.
@@ -44,6 +47,12 @@ REMOTE_ENABLED
 then
     start_codex_remote_control() {
         local attempt
+        # The worker must register MCP and create its socket before the daemon loads config.
+        for ready_attempt in $(seq 1 120); do
+            [ -f /run/codex-remote-verification-ready ] && break
+            sleep 1
+        done
+        [ -f /run/codex-remote-verification-ready ] || return 1
         for attempt in 1 2 3 4 5 6; do
             # Match the worker's environment boundary for Codex children.
             if env -u SUPERVISOR_TOKEN -u HASSIO_TOKEN -u HA_TOKEN -u HA_URL \

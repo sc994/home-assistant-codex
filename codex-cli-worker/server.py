@@ -5487,6 +5487,12 @@ def main() -> None:
     threading.Thread(target=backup_cleanup_loop, daemon=True).start()
     verification.serve(DATA_ROOT / "verification.sock")
     ha_data.serve(DATA_ROOT / "ha-data.sock")
+    # Remote sessions use their own read-only evidence scope, never task credentials.
+    from remote_verification import setup as setup_remote_verification
+    try:
+        setup_remote_verification(sys.modules[__name__], verification)
+    except (OSError, ValueError):
+        print("Remote verification setup failed; check private Codex configuration. Worker remains available.", flush=True)
     # Nothing else is running yet, so interrupted work from the last run can go.
     for leftover in ("download", "old"):
         shutil.rmtree(ha_docs_sibling(leftover), ignore_errors=True)

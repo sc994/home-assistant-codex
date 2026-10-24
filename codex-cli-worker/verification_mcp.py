@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import socket
 import sys
+
+REMOTE_ROOT = Path("/data/remote-verification")
 
 TOOL = {
     "name": "verify",
@@ -34,13 +37,17 @@ def verify(arguments):
         raise ValueError("Unsupported verification arguments")
     if arguments.get("operation") not in TOOL["inputSchema"]["properties"]["operation"]["enum"]:
         raise ValueError("Unsupported verification operation")
-    payload = {**arguments, "capability": os.environ.get("HA_VERIFICATION_CAPABILITY", "")}
+    remote = "--remote" in sys.argv[1:]
+    capability = ((REMOTE_ROOT / "capability").read_text().strip()
+                  if remote else os.environ.get("HA_VERIFICATION_CAPABILITY", ""))
+    payload = {**arguments, "capability": capability}
     encoded = json.dumps(payload).encode() + b"\n"
     if len(encoded) > 16384:
         raise ValueError("Verification request is too large")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(230)
-        client.connect(os.environ.get("HA_VERIFICATION_SOCKET", "/data/verification.sock"))
+        client.connect(str(REMOTE_ROOT / "verification.sock") if remote else
+                       os.environ.get("HA_VERIFICATION_SOCKET", "/data/verification.sock"))
         client.sendall(encoded)
         with client.makefile("rb") as response:
             raw = response.readline(128 * 1024 + 1)
@@ -51,6 +58,12 @@ def verify(arguments):
 
 def respond(request):
     """Implement the MCP initialization, discovery and single-tool request surface."""
+    if "--remote" in sys.argv[1:]:
+        TOOL["description"] = ("Read-only Home Assistant verification for paired remote sessions: "
+            "Core logs, entity states, configuration checks, dashboard readback and screenshots. "
+            "Inspect returned image_paths before visual claims. No actions, reloads, arbitrary URLs "
+            "or dashboard saves. Evidence stays locally for seven days. "
+            "Use worker tasks for tracked edits, backups and save_pending.")
     method = request.get("method")
     if method == "initialize":
         return {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}},

@@ -24,6 +24,8 @@ class RemoteControlStartupTests(unittest.TestCase):
             preference = root / "settings.json"
             if settings is not None:
                 preference.write_text(settings)
+            mcp_ready = root / "mcp-ready"
+            mcp_ready.touch()
             calls = root / "calls.jsonl"
             ready = root / "worker-ready"
             fake = root / "codex"
@@ -47,6 +49,7 @@ class RemoteControlStartupTests(unittest.TestCase):
                             startup.index('echo "Codex CLI Worker starting"')]
             block = block.replace("/data/codex-home/app-server-daemon/settings.json", str(preference))
             block = block.replace("/usr/local/bin/codex", str(fake))
+            block = block.replace("/run/codex-remote-verification-ready", str(mcp_ready))
             environment = {
                 "PATH": os.defpath,
                 **{key: "test-only" for key in ["SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN", "HA_URL", "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET"]},
