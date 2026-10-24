@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.79
+
+- Merge upstream main through 6b749ac, including dashboard read-policy and registered frontend-resource fixes.
+- Permit bounded recorder/statistic_during_period and camera/capabilities reads during dashboard inspection.
+- Support registered frontend scripts and stylesheets served through custom HTTP views, retaining exact version queries and write restrictions.
+- Preserve sc994 remote-control startup, remote verification, human approval prompts, image namespace and app identity.
+
 ## 0.1.78
 
 - Fix remote MCP tools being automatically rejected: interactive sessions now inherit `on-request` approvals with the human reviewer, including the legacy profile.

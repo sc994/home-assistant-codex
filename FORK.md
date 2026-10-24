@@ -4,7 +4,7 @@ This fork of moryoav/home-assistant-codex includes image-level fixes for Codex r
 
 ## Images and builds
 
-The worker image is ghcr.io/sc994/codex-cli-worker:0.1.78. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
+The worker image is ghcr.io/sc994/codex-cli-worker:0.1.79. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
 
 Before installation, verify that the image build and multi-architecture manifest succeeded. Ensure the published GHCR package is publicly readable so Home Assistant can pull it without additional registry credentials. Do not install a version before its image is published.
 
@@ -41,3 +41,7 @@ The worker generates `approval_policy = "on-request"` and `approvals_reviewer = 
 This fixes a 0.1.77 omission: remote MCP tools could be discovered, but `never` automatically rejected tools that needed approval. Update the app, restart it, and create a fresh remote session. Ask for a Core log check and allow that individual tool request. Declining it must leave the tool unexecuted. Existing remote chats may retain their old session policy.
 
 The pinned CLI regression uses a fake local model/MCP server, no real account or Home Assistant credentials, and proves the failure and both human decisions with the generated configuration. See [the official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) for interactive approval policies and MCP tool settings.
+
+## Upstream dashboard fixes (0.1.79)
+
+Merged moryoav/home-assistant-codex main through `6b749ac314131736429f5d74e17f7aba57acd98e` (upstream 0.1.76). This adds bounded dashboard reads and registered frontend-resource handling. Fork remote startup, private verification bridge and interactive human approvals remain in place. The app still uses the sc994 name/image and fork release numbering. The integration code is unchanged; its version is aligned for packaging.

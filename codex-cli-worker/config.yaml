@@ -1,6 +1,6 @@
 name: Codex CLI Worker (sc994)
 description: Run Codex CLI tasks against the Home Assistant config folder.
-version: "0.1.78"
+version: "0.1.79"
 slug: codex_cli_worker
 url: https://github.com/sc994/home-assistant-codex
 image: ghcr.io/sc994/codex-cli-worker
