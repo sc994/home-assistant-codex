@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.78
+
+- Fix remote MCP tools being automatically rejected: interactive sessions now inherit `on-request` approvals with the human reviewer, including the legacy profile.
+- Keep unattended `codex exec` runs explicitly non-interactive and preserve the workspace sandbox.
+- Add a real pinned-CLI regression that reproduces automatic rejection under `never`, then proves human allow and deny decisions under `on-request`.
+
 ## 0.1.77
 
 - Add `home_assistant_remote.verify` to paired remote Codex sessions: Core logs, entity states, configuration checks, dashboard readback and desktop/mobile screenshots.

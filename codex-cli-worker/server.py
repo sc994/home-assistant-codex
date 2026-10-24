@@ -736,12 +736,14 @@ def ensure_runtime_files() -> None:
         "\n".join(
             [
                 "check_for_update_on_startup = false",
-                'approval_policy = "never"',
+                'approval_policy = "on-request"',
+                'approvals_reviewer = "user"',
                 'sandbox_mode = "workspace-write"',
                 'web_search = "cached"',
                 "",
                 "[profiles.ha_auto_review]",
-                'approval_policy = "never"',
+                'approval_policy = "on-request"',
+                'approvals_reviewer = "user"',
                 'sandbox_mode = "workspace-write"',
                 'web_search = "cached"',
                 "",
@@ -3631,6 +3633,8 @@ def build_codex_args(task_id: str, prompt_file: Path, final_file: Path, session_
         args.extend(["--model", model])
     args.extend(["--config", f'model_reasoning_effort="{execution["reasoning_effort"]}"'])
     args.extend(["--config", f'model_reasoning_summary="{reasoning_summary(options)}"'])
+    # Only unattended exec uses never; interactive remote sessions inherit on-request.
+    args.extend(["--config", 'approval_policy="never"'])
     args.extend(verification_mcp_args())
     args.extend(data_mcp_args())
     if session_id:

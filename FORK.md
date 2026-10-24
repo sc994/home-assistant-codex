@@ -4,7 +4,7 @@ This fork of moryoav/home-assistant-codex includes image-level fixes for Codex r
 
 ## Images and builds
 
-The worker image is ghcr.io/sc994/codex-cli-worker:0.1.77. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
+The worker image is ghcr.io/sc994/codex-cli-worker:0.1.78. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
 
 Before installation, verify that the image build and multi-architecture manifest succeeded. Ensure the published GHCR package is publicly readable so Home Assistant can pull it without additional registry credentials. Do not install a version before its image is published.
 
@@ -33,3 +33,11 @@ The worker installs one marked `[mcp_servers.home_assistant_remote]` table in it
 Verification uses an owner-only Unix socket and a fresh boot capability in `/data/remote-verification`, with no Supervisor token passed to Codex. Requests are accepted only while the saved remote-control preference is enabled. The bridge permits at most 24 checks and four dashboard captures per minute, one remote request at a time, and shares the browser execution lock with worker checks. Redacted results and screenshots are private local evidence, retained for seven days, with paths returned to the requesting agent. They are not attached to an add-on UI conversation.
 
 Remote verification does not run service calls or reloads, and rejects `save_pending:true`: use a worker task for edits, per-turn backups, and dashboard saves. Historical data tools are separate and are not added by this change. Disable remote control to revoke remote verification; the capability rotates when the app restarts. The Home Assistant integration must point to this worker for Core logs and authenticated dashboard captures.
+
+## Interactive approval fix (0.1.78)
+
+The worker generates `approval_policy = "on-request"` and `approvals_reviewer = "user"` for interactive sessions and the legacy `ha_auto_review` profile. The sandbox remains `workspace-write`. Unattended `codex exec` commands explicitly override the policy to `never`; the worker's bidirectional app-server already routes requests to the user.
+
+This fixes a 0.1.77 omission: remote MCP tools could be discovered, but `never` automatically rejected tools that needed approval. Update the app, restart it, and create a fresh remote session. Ask for a Core log check and allow that individual tool request. Declining it must leave the tool unexecuted. Existing remote chats may retain their old session policy.
+
+The pinned CLI regression uses a fake local model/MCP server, no real account or Home Assistant credentials, and proves the failure and both human decisions with the generated configuration. See [the official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) for interactive approval policies and MCP tool settings.

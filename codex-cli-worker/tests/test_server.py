@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import types
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -727,6 +728,14 @@ class RuntimeConfigTests(unittest.TestCase):
                 config = (root / "codex-home" / "config.toml").read_text(encoding="utf-8")
 
         self.assertIn("check_for_update_on_startup = false", config)
+        settings = tomllib.loads(config)
+        self.assertEqual(settings["approval_policy"], "on-request")
+        self.assertEqual(settings["approvals_reviewer"], "user")
+        self.assertEqual(settings["sandbox_mode"], "workspace-write")
+        profile = settings["profiles"]["ha_auto_review"]
+        self.assertEqual(profile["approval_policy"], "on-request")
+        self.assertEqual(profile["approvals_reviewer"], "user")
+        self.assertEqual(profile["sandbox_mode"], "workspace-write")
 
 
 class HealthRouteTests(unittest.TestCase):
