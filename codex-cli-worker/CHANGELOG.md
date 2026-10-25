@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.80
+
+- Merge upstream main through e716071: dashboard permission batches, remembered permissions, socket isolation, observational subscriptions and mobile capture fixes.
+- Add remote `worker_task` start/status/continue/cancel access through the existing tracked worker lifecycle, including backups and configuration checks.
+- Restrict remote task access to remotely created chats, bound inputs/results, and keep native approvals and browser permissions in the human Ingress UI.
+- Preserve fork startup, image namespace, boot-scoped capabilities and read-only verification.
+
 ## 0.1.79
 
 - Merge upstream main through 6b749ac, including dashboard read-policy and registered frontend-resource fixes.

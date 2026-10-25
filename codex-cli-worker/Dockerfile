@@ -57,7 +57,8 @@ WORKDIR /data
 
 COPY run.sh /
 COPY server.py /
-COPY approvals.py remote_verification.py verification.py verification_mcp.py ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs /
+COPY remote_tasks.py /
+COPY approvals.py remote_verification.py verification.py verification_mcp.py browser_permissions.py browser_permission_policy.json ha_data.py ha_data_mcp.py browser.cjs browser_resources.cjs browser_permissions.cjs /
 COPY web /web
 
 RUN chmod a+x /run.sh /server.py

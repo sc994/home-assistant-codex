@@ -1,6 +1,7 @@
 // A bounded, observational HA browser. No click, evaluate, or arbitrary URL tool.
 const { chromium } = require('playwright-core');
 const { ResourcePolicy, createExternalFetcher } = require('./browser_resources.cjs');
+const { BrowserPermissions, CommandTracker, LIMITS, raster, boundedResult, websocketBlockReason } = require('./browser_permissions.cjs');
 
 const READ_MESSAGES = new Set([
   'get_config', 'get_states', 'get_services', 'auth/current_user', 'supported_features',
@@ -21,6 +22,31 @@ const READ_MESSAGES = new Set([
   'energy/get_prefs', 'energy/info', 'get_panels', 'manifest/list', 'camera/capabilities',
 ]);
 
+/** Recognize bounded built-in predicates; Core still validates their values. */
+function readOnlyCondition(condition) {
+  let remaining = 512;
+  const bounded = (value, depth = 0) => {
+    if (--remaining < 0 || depth > LIMITS.depth) return false;
+    if (typeof value === 'string') return value.length <= 4096;
+    if (value && typeof value === 'object') return Object.values(value).every(item => bounded(item, depth + 1));
+    return value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
+  };
+  const predicate = value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const common = ['condition', 'alias', 'enabled'];
+    if (['and', 'or', 'not'].includes(value.condition))
+      return Object.keys(value).every(key => [...common, 'conditions'].includes(key)) &&
+        Array.isArray(value.conditions) && value.conditions.every(predicate);
+    const fields = value.condition === 'state' ? ['entity_id', 'state', 'attribute', 'for', 'match'] :
+      value.condition === 'numeric_state' ? ['entity_id', 'attribute', 'above', 'below', 'value_template'] : null;
+    return !!fields && Object.keys(value).every(key => [...common, ...fields].includes(key)) &&
+      Object.hasOwn(value, 'entity_id') && (value.condition === 'state' ? Object.hasOwn(value, 'state') :
+        Object.hasOwn(value, 'above') || Object.hasOwn(value, 'below'));
+  };
+  // Bound the whole value before serializing or traversing the predicate tree.
+  return bounded(condition) && Buffer.byteLength(JSON.stringify(condition)) <= 16 * 1024 && predicate(condition);
+}
+
 /**
  * Return whether a WebSocket message from the dashboard may be forwarded to
  * Home Assistant. Only the read-only commands listed here and subscriptions
@@ -28,9 +54,11 @@ const READ_MESSAGES = new Set([
  */
 function allowMessage(message) {
   if (!message || typeof message !== 'object' || Array.isArray(message)) return false;
-  // This handler only returns frontend configuration. Do not subscribe this
-  // capture browser to physical knob events or report navigation results.
-  if (message.type === 'knob_swipe_navigation/config')
+  if (message.type === 'subscribe_condition')
+    return Object.keys(message).every(key => ['id', 'type', 'condition'].includes(key)) && readOnlyCondition(message.condition);
+  // These handlers only return configuration or listen for rotation events.
+  // Reporting navigation results remains blocked because it updates HA state.
+  if (['knob_swipe_navigation/config', 'knob_swipe_navigation/subscribe_rotations'].includes(message.type))
     return Object.keys(message).every(key => ['id', 'type'].includes(key));
   // These custom_icons handlers only return active sets, icon lists, cached
   // icons, or one icon. Selection/download handlers remain blocked. Bound names
@@ -85,10 +113,23 @@ async function inspect(input) {
   if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password || origin.includes(','))
     throw Error('Invalid Home Assistant origin');
   if (!/^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?\/?$/.test(input.path)) throw Error('Invalid dashboard path');
+  // Core's WebSocket is opened with Node's built-in client (Node.js 22 or newer).
+  if (typeof WebSocket !== 'function')
+    return { status: 'unavailable', stage: 'launch', message: 'Dashboard verification needs Node.js 22 or newer for its Home Assistant connection.' };
   const errors = [], blocked = [], screenshots = [];
   const findings = new Map();
+  // Share the condition limit across sockets so opening another cannot bypass it.
+  const conditionBudget = {active: 0, limit: LIMITS.condition_subscriptions};
   let omitted = 0;
   const policy = new ResourcePolicy(origin, input.resources);
+  const permissions = new BrowserPermissions(input.permissions);
+  let mapToken;
+  // Core connections opened for the current page; closed with it.
+  const upstreams = new Set();
+  const closeUpstreams = () => {
+    for (const socket of [...upstreams]) try { socket.close(); } catch (_) { /* Already closing. */ }
+    upstreams.clear();
+  };
   const fetchExternal = createExternalFetcher(policy);
   const blockedURLs = new Set();
   /** Name a resource by its path, preceded by the host when it is external. */
@@ -115,9 +156,9 @@ async function inspect(input) {
     if (activeViewport && !finding.viewports.includes(activeViewport.name)) finding.viewports.push(activeViewport.name);
   };
   /** Return the errors, blocked items, and findings gathered so far. */
-  const evidence = () => ({errors, blocked, findings: [...findings.values()], findings_omitted: omitted});
+  const evidence = () => ({errors, blocked, findings: [...findings.values()], findings_omitted: omitted, ...permissions.evidence()});
   const policyNote = () => blocked.length
-    ? ' Read-only policy blocks limit this inspection; they do not establish faults on another device.' : '';
+    ? ' Inspection policy blocks limit this capture. A blocked request is not necessarily a write or a fault on another device. Each WebSocket block explains whether approval is available.' : '';
   try {
     browser = await chromium.launch({
       executablePath: process.env.HA_BROWSER_EXECUTABLE || '/usr/bin/chromium-browser',
@@ -149,7 +190,8 @@ async function inspect(input) {
           return route.abort('blockedbyclient').catch(() => {});
         }
       }
-      if (!allowRequest(url, origin, req.method(), input.path) && !policy.local(url, req.method(), req.resourceType())) {
+      if (!allowRequest(url, origin, req.method(), input.path) && !policy.local(url, req.method(), req.resourceType()) &&
+          !permissions.http(url, origin, req.method(), activeViewport?.name)) {
         add(blocked, `${req.method()} ${resourceLabel(url)}`, 'resource');
         if (blockedURLs.size < 256) blockedURLs.add(url.href);
         return route.abort('blockedbyclient').catch(() => {});
@@ -158,9 +200,20 @@ async function inspect(input) {
       const headers = { ...req.headers() };
       if (url.pathname.startsWith('/api/') && headers.authorization === 'Bearer verification-session')
         headers.authorization = `Bearer ${input.access_token}`;
+      const fetchURL = new URL(url);
+      if (raster(url)) {
+        if (fetchURL.searchParams.get('token') === 'verification-map-session') {
+          if (!mapToken) return route.abort('blockedbyclient').catch(() => {});
+          fetchURL.searchParams.set('token', mapToken);
+        }
+        if (headers['x-map-tiles-token'] === 'verification-map-session') {
+          if (!mapToken) return route.abort('blockedbyclient').catch(() => {});
+          headers['x-map-tiles-token'] = mapToken;
+        }
+      }
       let response;
       try {
-        response = await route.fetch({ headers, maxRedirects: 0, timeout: 15000 });
+        response = await route.fetch({ url: fetchURL.href, headers, maxRedirects: 0, timeout: 15000 });
         if (response.status() >= 300 && response.status() < 400) {
           add(blocked, `Redirect ${url.pathname}`, 'resource');
           if (blockedURLs.size < 256) blockedURLs.add(url.href);
@@ -182,43 +235,114 @@ async function inspect(input) {
       const url = new URL(route.url());
       if (url.host !== new URL(origin).host || url.pathname !== '/api/websocket' ||
           url.protocol !== (origin.startsWith('https:') ? 'wss:' : 'ws:')) {
-        route.close(); return;
+        route.close().catch(() => {}); return;
       }
-      const upstream = route.connectToServer();
-      let authenticated = false;
-      const commands = new Map();
-      upstream.onMessage(raw => {
-        try {
-          const parsed = JSON.parse(String(raw));
-          for (const message of (Array.isArray(parsed) ? parsed : [parsed])) {
-            if (message.type === 'result' && message.success &&
-                ['lovelace/resources', 'lovelace/resources/list'].includes(commands.get(message.id)) && Array.isArray(message.result))
-              for (const resource of message.result.slice(0, 256)) policy.register(resource?.url);
-            if (message.type === 'result' && message.success === false)
-              add(errors, `Home Assistant ${commands.get(message.id) || 'request'}: ${message.error?.code || 'error'}`, 'home_assistant');
-          }
-        } catch (_) { /* Forward opaque frames without logging their contents. */ }
-        route.send(raw);
+      // Open Core's socket here in Node. Playwright's connectToServer() opens it
+      // inside the page, where page scripts could read raw frames, capture the
+      // real access token and send commands that bypass these checks.
+      const upstream = new WebSocket(url.href);
+      upstream.binaryType = 'arraybuffer';
+      upstreams.add(upstream);
+      const commands = new CommandTracker(1000, conditionBudget);
+      const pending = [];
+      let authenticated = false, closed = false;
+      /** Send to Core once it is connected; nothing is sent after either side closes. */
+      const toCore = data => {
+        if (closed) return;
+        if (upstream.readyState === WebSocket.OPEN) upstream.send(data);
+        else pending.push(data);
+      };
+      /** Close both sides, recording why the controller ended the connection. */
+      const closeBoth = (reason, kind = 'home_assistant') => {
+        if (closed) return;
+        closed = true;
+        commands.close();
+        add(errors, `Dashboard connection closed: ${reason}`, kind);
+        route.close({ code: 4008, reason: 'Blocked by dashboard verification' }).catch(() => {});
+        try { upstream.close(); } catch (_) { /* Already closing. */ }
+      };
+      /** Answer a refused request the way Core answers an error, without forwarding it. */
+      const refuse = (message, reason, code = 'unauthorized') => {
+        const explanation = `${reason}. Approval is unavailable.`;
+        add(blocked, `WebSocket ${String(message.type)} (${reason}): Approval is unavailable.`, 'policy');
+        if (Number.isInteger(message.id)) route.send(JSON.stringify({
+          id: message.id, type: 'result', success: false, error: { code, message: `Blocked by dashboard verification: ${explanation}` },
+        }));
+      };
+      upstream.addEventListener('open', () => {
+        for (const data of pending.splice(0)) upstream.send(data);
+      });
+      upstream.addEventListener('error', () => {
+        if (!closed) add(errors, 'Home Assistant WebSocket connection failed', 'home_assistant');
+      });
+      upstream.addEventListener('close', () => {
+        upstreams.delete(upstream);
+        if (closed) return;
+        closed = true;
+        commands.close();
+        route.close().catch(() => {});
+      });
+      upstream.addEventListener('message', event => {
+        if (closed) return;
+        if (typeof event.data !== 'string') return closeBoth('Home Assistant sent an unsupported frame');
+        let parsed;
+        try { parsed = JSON.parse(event.data); } catch (_) { return closeBoth('Home Assistant sent an invalid frame'); }
+        const messages = Array.isArray(parsed) ? parsed : [parsed];
+        // Validate the whole frame and scrub token responses before anything
+        // else; unexpected frames close the connection and are never forwarded.
+        if (messages.some(message => !message || typeof message !== 'object' || Array.isArray(message)))
+          return closeBoth('Home Assistant sent an invalid frame');
+        let outgoing = event.data;
+        for (const message of messages) {
+          if (message.type !== 'result' || !message.success || commands.type(message.id) !== 'map_tiles/access_token') continue;
+          if (typeof message.result?.token === 'string') mapToken = message.result.token;
+          else add(errors, 'Home Assistant returned an unexpected map token response', 'home_assistant');
+          message.result = { token: 'verification-map-session' };
+          outgoing = JSON.stringify(parsed);
+        }
+        for (const message of messages) {
+          const type = commands.type(message.id);
+          if (message.type === 'result' && message.success &&
+              ['lovelace/resources', 'lovelace/resources/list'].includes(type) && Array.isArray(message.result))
+            for (const resource of message.result.slice(0, 256)) policy.register(resource?.url);
+          if (message.type === 'result' && message.success === false)
+            add(errors, `Home Assistant ${type || 'request'}: ${message.error?.code || 'error'}${message.error?.code === 'unauthorized'
+              ? '. Home Assistant denied access for the read-only browser account. Browser approval cannot change Home Assistant permissions.' : ''}`, 'home_assistant');
+          commands.settle(message);
+        }
+        route.send(outgoing);
+      });
+      route.onClose(() => {
+        if (closed) return;
+        closed = true;
+        commands.close();
+        try { upstream.close(); } catch (_) { /* Already closing. */ }
       });
       route.onMessage(raw => {
+        if (closed) return;
         let message;
-        try { message = JSON.parse(String(raw)); } catch { route.close(); return; }
-        if (!message || typeof message !== 'object' || Array.isArray(message)) { route.close(); return; }
+        try { message = JSON.parse(String(raw)); } catch (_) { return closeBoth('the dashboard sent an invalid message', 'dashboard'); }
+        if (!message || typeof message !== 'object' || Array.isArray(message))
+          return closeBoth('the dashboard sent an invalid message', 'dashboard');
         if (message.type === 'auth' && !authenticated) {
           authenticated = true;
-          upstream.send(JSON.stringify({ type: 'auth', access_token: input.access_token }));
-        } else if (authenticated && allowMessage(message)) {
-          if (commands.size < 500) commands.set(message.id, message.type);
-          upstream.send(raw);
+          toCore(JSON.stringify({ type: 'auth', access_token: input.access_token }));
+        } else if (authenticated && (allowMessage(message) || permissions.message(message, activeViewport?.name))) {
+          // Core requires increasing request IDs, so each response correlates
+          // with exactly one request, including map token responses.
+          const refused = commands.accept(message);
+          if (refused) return refuse(message, refused, refused.includes('ID') ? 'id_reuse' : 'unauthorized');
+          toCore(String(raw));
         } else {
           const service = message.type === 'call_service' && /^[a-z_]+$/.test(message.domain) && /^[a-z_]+$/.test(message.service)
             ? `${message.domain}.${message.service}` : '';
           const diagnostic = ['system_log.write', 'persistent_notification.create'].includes(service);
-          add(diagnostic ? null : blocked, `WebSocket ${String(message.type)}${service ? ` (${service})` : message.event_type ? ` (${message.event_type})` : ''}`,
+          const reason = websocketBlockReason(message);
+          add(diagnostic ? null : blocked, `WebSocket ${String(message.type)}${service ? ` (${service})` : message.event_type ? ` (${message.event_type})` : ''}: ${reason}`,
             diagnostic ? 'diagnostic' : 'policy');
           if (Number.isInteger(message.id)) route.send(JSON.stringify({
             id: message.id, type: 'result', success: false,
-            error: { code: 'unauthorized', message: 'Blocked by dashboard verification' },
+            error: { code: 'unauthorized', message: `Blocked by dashboard verification: ${reason}` },
           }));
         }
       });
@@ -297,10 +421,11 @@ async function inspect(input) {
       await page.screenshot({ path: file, fullPage: false, timeout: 10000 });
       screenshots.push({ name, file, width, height, ...layout });
       await page.close();
+      closeUpstreams();
     }
     await context.close();
-    return { status: errors.length || blocked.length || omitted ? 'issues' : 'captured', ...evidence(), screenshots,
-      message: 'Screenshots captured for visual inspection. This is not proof of correct layout or automation behavior.' + policyNote() };
+    return boundedResult({ status: errors.length || blocked.length || omitted ? 'issues' : 'captured', ...evidence(), screenshots,
+      message: 'Screenshots captured for visual inspection. This is not proof of correct layout or automation behavior.' + policyNote() });
   } catch (_) {
     if (activePage && !activePage.isClosed()) {
       try {
@@ -309,19 +434,33 @@ async function inspect(input) {
         screenshots.push({...activeViewport, file});
       } catch (_) { /* The page may already have crashed. */ }
     }
-    return { status: 'unavailable', stage, ...evidence(), screenshots,
-      message: `Dashboard verification could not finish during ${stage}.` + policyNote() };
+    return boundedResult({ status: 'unavailable', stage, ...evidence(), screenshots,
+      message: `Dashboard verification could not finish during ${stage}.` + policyNote() });
   } finally {
+    closeUpstreams();
     await browser?.close();
   }
 }
 
 if (require.main === module) {
-  let input = '';
-  process.stdin.on('data', data => { input += data; if (input.length > 65536) process.exit(2); });
+  let input = '', inputBytes = 0;
+  // The worker checks the same shared limit before it starts the controller.
+  // This is independent of the 64 KiB output cap.
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', data => {
+    inputBytes += Buffer.byteLength(data);
+    if (inputBytes > LIMITS.controller_input_bytes) process.exit(2);
+    input += data;
+  });
   process.stdin.on('end', async () => {
-    try { console.log(JSON.stringify(await inspect(JSON.parse(input)))); }
-    catch (_) { console.log(JSON.stringify({ status: 'unavailable', message: 'Browser verification could not load the dashboard. Check local access, authentication, browser availability, and dashboard permissions.' })); process.exitCode = 1; }
+    let output, code = 0;
+    try { output = JSON.stringify(await inspect(JSON.parse(input))); }
+    catch (_) {
+      output = JSON.stringify({ status: 'unavailable', message: 'Browser verification could not load the dashboard. Check local access, authentication, browser availability, and dashboard permissions.' });
+      code = 1;
+    }
+    // Exit once the result is written, so a Core socket still closing cannot keep the controller alive.
+    process.stdout.write(`${output}\n`, () => process.exit(code));
   });
 }
 module.exports = { allowRequest, allowMessage, inspect };

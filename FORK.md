@@ -4,7 +4,7 @@ This fork of moryoav/home-assistant-codex includes image-level fixes for Codex r
 
 ## Images and builds
 
-The worker image is ghcr.io/sc994/codex-cli-worker:0.1.79. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
+The worker image is ghcr.io/sc994/codex-cli-worker:0.1.80. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
 
 Before installation, verify that the image build and multi-architecture manifest succeeded. Ensure the published GHCR package is publicly readable so Home Assistant can pull it without additional registry credentials. Do not install a version before its image is published.
 
@@ -45,3 +45,20 @@ The pinned CLI regression uses a fake local model/MCP server, no real account or
 ## Upstream dashboard fixes (0.1.79)
 
 Merged moryoav/home-assistant-codex main through `6b749ac314131736429f5d74e17f7aba57acd98e` (upstream 0.1.76). This adds bounded dashboard reads and registered frontend-resource handling. Fork remote startup, private verification bridge and interactive human approvals remain in place. The app still uses the sc994 name/image and fork release numbering. The integration code is unchanged; its version is aligned for packaging.
+
+## Remote worker tasks and upstream merge (0.1.80)
+
+Merged upstream main through `e716071` (upstream 0.1.78), including browser permission batches and remembered permissions, isolated dashboard WebSockets, bounded observational condition subscriptions, and mobile capture timing. Fork release numbers remain independent of upstream.
+
+After the 0.1.80 image build succeeds, update/restart the app and open a fresh remote session (or refresh its MCP tools). The existing `home_assistant_remote` server now also exposes `worker_task`:
+
+- `{"operation":"start","prompt":"Back up and update the Viewport automations so their Viewport actions run only while media_player.living_room_living_room_tv is on and select.up_viewport_live_view is available. Preserve other behavior and validate the configuration."}`
+- `{"operation":"status","task_id":"ID returned by start"}`
+- `{"operation":"continue","task_id":"ID","turn_id":"current_turn_id returned by status","message":"Follow-up instruction"}`
+- `{"operation":"cancel","task_id":"ID"}`
+
+Starting or continuing a task authorizes configuration work through the regular task scheduler, using the app's configured execution settings, per-turn backups, and enabled configuration checks. It does not provide arbitrary HTTP requests, credentials, or direct file access. Status is bounded and redacted; it reports results and whether a native permission request needs human review in the add-on web UI. This tool cannot answer native approval requests or manage browser permissions. A queued response is not completion: poll status and inspect the result.
+
+Only chats created through this tool can be read, continued or cancelled remotely. The marker is stored with the task and survives app restarts. A new boot capability is still required after each restart, all calls still require saved remote control to be enabled, and the existing 24-call/minute limit applies. Disabling remote control revokes further bridge calls; it does not automatically cancel tasks already accepted by the scheduler. Use cancel or the add-on UI for those tasks. No new LAN port or Supervisor permission is added.
+
+`verify` remains read-only. For live configuration editing, use `worker_task`; backups and configuration checks remain part of the normal worker run, not the verification bridge.

@@ -21,6 +21,8 @@ jobs:
             pytest-ha: '0.13.337'
           - core: '2026.9.4'
             pytest-ha: '0.13.367'
+          - core: '2026.10.3'
+            pytest-ha: '0.13.374'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -51,6 +53,7 @@ jobs:
       - name: Exercise browser protocol and restrictions
         run: |
           node codex-cli-worker/tests/browser_resources.cjs
+          node codex-cli-worker/tests/browser_permissions.cjs
           node codex-cli-worker/tests/browser_verification.cjs
       - name: Exercise chat evidence on desktop and mobile
         run: |
@@ -63,6 +66,7 @@ jobs:
           done
           node codex-cli-worker/tests/browser_smoke.cjs
           node codex-cli-worker/tests/browser_copy.cjs
+          node codex-cli-worker/tests/browser_permissions_ui.cjs
 
   container:
     name: Container (${{ matrix.arch }})

@@ -14,6 +14,7 @@ TOOL = {
     "description": (
         "Check Home Assistant configuration, fresh entity state, Core logs, or dashboard configuration. "
         "Dashboard checks capture desktop/mobile screenshots; inspect their image_paths before visual claims. "
+        "Blocked requests include reasons and approval availability; a policy block does not imply a write. "
         "save_pending saves only a dashboard edited in this turn when auto-save is enabled. "
         "No service calls, reloads, arbitrary URLs, or other apps' logs."
     ),
@@ -30,17 +31,46 @@ TOOL = {
     },
 }
 
+WORKER_TOOL = {
+    "name": "worker_task",
+    "description": (
+        "Start a tracked Home Assistant configuration-editing task, read its status, continue it, or cancel it. "
+        "Tasks use the add-on's existing backups, configuration checks and execution settings. "
+        "Only tasks created by this tool are accessible. Start/continue may modify configuration; "
+        "use only for user-authorized work. Poll status to verify completion, never claim queued work is done. "
+        "For continue, pass current_turn_id from status as turn_id. Native permission decisions and "
+        "browser permissions must be reviewed by the human in the add-on web UI; this tool cannot approve them."
+    ),
+    "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False},
+    "inputSchema": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "operation": {"type": "string", "enum": ["start", "status", "continue", "cancel"]},
+            "prompt": {"type": "string", "maxLength": 8000},
+            "task_id": {"type": "string", "maxLength": 128},
+            "message": {"type": "string", "maxLength": 8000},
+            "turn_id": {"type": "string", "maxLength": 128},
+        },
+        "required": ["operation"],
+    },
+}
 
-def verify(arguments):
+
+def verify(arguments, *, worker_task=False):
     """Forward only the supported fields and the process's temporary capability."""
-    if not isinstance(arguments, dict) or set(arguments) - set(TOOL["inputSchema"]["properties"]):
+    tool = WORKER_TOOL if worker_task else TOOL
+    if not isinstance(arguments, dict) or set(arguments) - set(tool["inputSchema"]["properties"]):
         raise ValueError("Unsupported verification arguments")
-    if arguments.get("operation") not in TOOL["inputSchema"]["properties"]["operation"]["enum"]:
+    if arguments.get("operation") not in tool["inputSchema"]["properties"]["operation"]["enum"]:
         raise ValueError("Unsupported verification operation")
     remote = "--remote" in sys.argv[1:]
+    if worker_task and not remote:
+        raise ValueError("Worker tasks require the remote bridge")
     capability = ((REMOTE_ROOT / "capability").read_text().strip()
                   if remote else os.environ.get("HA_VERIFICATION_CAPABILITY", ""))
     payload = {**arguments, "capability": capability}
+    if worker_task:
+        payload['kind'] = 'worker_task'
     encoded = json.dumps(payload).encode() + b"\n"
     if len(encoded) > 16384:
         raise ValueError("Verification request is too large")
@@ -71,13 +101,14 @@ def respond(request):
     if method == "ping":
         return {}
     if method == "tools/list":
-        return {"tools": [TOOL]}
+        return {"tools": [TOOL, WORKER_TOOL] if "--remote" in sys.argv[1:] else [TOOL]}
     if method == "tools/call":
         params = request.get("params", {})
         try:
-            if params.get("name") != TOOL["name"]:
+            is_task = params.get("name") == WORKER_TOOL["name"] and "--remote" in sys.argv[1:]
+            if params.get("name") != TOOL["name"] and not is_task:
                 raise ValueError("Unknown verification tool")
-            result = verify(params.get("arguments", {}))
+            result = verify(params.get("arguments", {}), worker_task=True) if is_task else verify(params.get("arguments", {}))
         except (OSError, ValueError, TypeError):
             result = {"status": "unavailable", "message": "Verification request failed or the task has ended"}
         return {"content": [{"type": "text", "text": json.dumps(result)}],

@@ -1,7 +1,7 @@
-"""Read-only Home Assistant verification for paired local Codex remote sessions.
+"""Home Assistant verification and tracked worker tasks for paired remote sessions.
 
 The MCP client receives a boot-scoped socket capability, never Supervisor/API credentials.
-Each check owns its evidence; remote sessions cannot save pending dashboards.
+Each check owns its evidence; writes go through tracked tasks, not verification.
 """
 from __future__ import annotations
 
@@ -148,8 +148,10 @@ class RemoteVerification(Verification):
             enabled = False
         if not enabled:
             raise ValueError('Remote control is disabled')
-        allowed = {'capability', 'operation', 'entity_id', 'expected_state', 'attributes', 'path', 'save_pending'}
-        if set(payload) - allowed or payload.get('operation') not in {'entity', 'config_check', 'logs', 'dashboard', 'dashboard_readback'}:
+        is_task = payload.get('kind') == 'worker_task'
+        allowed = ({'capability', 'kind', 'operation', 'prompt', 'task_id', 'message', 'turn_id'} if is_task else
+                   {'capability', 'operation', 'entity_id', 'expected_state', 'attributes', 'path', 'save_pending'})
+        if set(payload) - allowed or (not is_task and payload.get('operation') not in {'entity', 'config_check', 'logs', 'dashboard', 'dashboard_readback'}):
             raise ValueError('Unsupported remote verification request')
         if payload.get('save_pending') not in (None, False):
             raise ValueError('Remote verification cannot save dashboards; use a worker task')
@@ -169,6 +171,10 @@ class RemoteVerification(Verification):
                     return {'status': 'unavailable', 'message': 'Remote dashboard limit reached; retry after one minute'}
                 self.browsers.append(now)
             self.recent.append(now)
+            if is_task:
+                from remote_tasks import dispatch
+                return dispatch(self.source_worker, {k: v for k, v in payload.items()
+                                                     if k not in {'capability', 'kind'}})
             task_id = str(uuid.uuid4())
             self.worker.tasks[task_id] = dict(task_id=task_id, status='running', current_turn_id=task_id)
             cap = self.begin(task_id)
