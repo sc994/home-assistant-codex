@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.81
+
+- Map the Home Assistant `media` folder at `/media` (read-write) so the worker can read and write the shared Markdown context folder `/media/ai-context`. No other behavior changes.
+
 ## 0.1.80
 
 - Merge upstream main through e716071: dashboard permission batches, remembered permissions, socket isolation, observational subscriptions and mobile capture fixes.

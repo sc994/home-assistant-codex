@@ -4,7 +4,7 @@ This fork of moryoav/home-assistant-codex includes image-level fixes for Codex r
 
 ## Images and builds
 
-The worker image is ghcr.io/sc994/codex-cli-worker:0.1.80. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
+The worker image is ghcr.io/sc994/codex-cli-worker:0.1.81. Changes to the worker on main trigger the existing multi-architecture build workflow; it can also be run manually under Actions. Enable Actions for the fork if GitHub asks. The workflow uses the repository GITHUB_TOKEN, so a separate registry password is not needed.
 
 Before installation, verify that the image build and multi-architecture manifest succeeded. Ensure the published GHCR package is publicly readable so Home Assistant can pull it without additional registry credentials. Do not install a version before its image is published.
 
